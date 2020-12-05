@@ -1,9 +1,9 @@
-####################################
-# Makefile for SMS Hello World!
+############################################
+# Makefile for SMS Z80 Sample
 # Date: November 22, 2020
 # Author: Jacques Belosoukinski <kentosama>
 # Github: https://github.com/kentosama
-###################################
+############################################
 
 # Recursive wildcard
 rwildcard = $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
@@ -25,7 +25,7 @@ OBJS:=$(addprefix $(OUT_DIR)/, $(OBJ))
 BIN=helloworld.sms
 EMULATOR=blastem
 
-release: prebuild $(OUT_DIR)/$(BIN) postbuild
+release: $(OUT_DIR)/$(BIN)
 
 all: release
 
@@ -34,23 +34,16 @@ all: release
 run: release
 	$(EMULATOR) $(OUT_DIR)/$(BIN)
 
-prebuild:
+clean:
+	@rm -rf $(OUT_DIR)/*
+	
+$(OUT_DIR)/$(BIN): $(OBJS)
 	@mkdir -p $(OUT_DIR)
 	@echo -e '[objects]' > $(OUT_DIR)/tmp
 	@echo -e $(OBJS) >> $(OUT_DIR)/tmp
-
-postbuild:
-	
-
-clean:
-	@rm -f $(OUT_DIR)/tmp
-	@rm -rf $(OUT_DIR)/$(SRC_DIR)
-	
-$(OUT_DIR)/$(BIN): $(OBJS)
 	$(LD) -v -r $(OUT_DIR)/tmp $(OUT_DIR)/$(BIN)
-
+	@rm -rf $(OUT_DIR)/tmp
 	
 $(OUT_DIR)/%.rel: %.asm
 	@mkdir -p $(@D)
 	$(ASM) -o $@ $^
-	
