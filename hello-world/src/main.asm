@@ -1,5 +1,5 @@
 ; ----------------------------------------------------------------------
-; WLADX 
+; MEMORY MAP 
 ; ----------------------------------------------------------------------
 .memorymap
     defaultslot 0
@@ -17,62 +17,72 @@
 ; ----------------------------------------------------------------------
 ; SDSC TAG HEADER
 ; ----------------------------------------------------------------------
-.sdsctag 1.10, "Hello World!", "Simple Hello World! for SEGA Master System ", "Kentosama"
+.sdsctag 0.01, "Hello World!", "Simple Hello World! for SEGA Master System ", "Kentosama"
 ; ----------------------------------------------------------------------
 
+.bank 0 slot 0                          ; Set the bank 0 at slot 0
+
 ; ----------------------------------------------------------------------
-; SEGA MASTER SYSTEM VDP
+; BOOT
+; ----------------------------------------------------------------------
+.org $0000                              ; Program begin
+    di                                  ; Disable interrupt
+    im 1                                ; Set interrupt mode to 1
+    ld sp, $dff0                        ; Stack pile start at $dff0
+    jp Main                             ; Jump to the main subroutine
+; -----------------------------------------------------------------------
+
+; -----------------------------------------------------------------------
+; SMS PAUSE
+; -----------------------------------------------------------------------
+.org $0066                              ; Pause
+    retn                                ; Return
+
+; ----------------------------------------------------------------------
+; SEGA MASTER SYSTEM DEFINES
 ; ----------------------------------------------------------------------
 .define VDP_CONTROL     $bf
 .define VDP_DATA        $be
 .define VRAM_ADDR       $4000
 .define CRAM_ADDR       $c000
+.define SYS_RAM         $c000
 ; ----------------------------------------------------------------------
 
-.bank 0 slot 0                      ; Set the bank 0 at slot 0
-.org $0000                          ; Program begin
-    di                              ; Disable interrupt
-    im 1                            ; Set interrupt mode to 1
-    ld sp, $dff0                    ; Stack pile start at $dff0
-    jp Main                         ; Jump to the main subroutine
-
-.org $0006                          ; Pause
-    retn                            ; Return
-
+; -----------------------------------------------------------------------
+; MAIN PROGRAM
+; -----------------------------------------------------------------------
 Main:
-    call SYS_ClearRAM               ; Clear RAM
-    call VDP_Initialize             ; Initialize the VDP
-    call VDP_loadFont               ; Load font in VRAM
-    call VDP_WriteMessage
-    call VDP_SetDisplayOn
--:  jr -                            ; Main loop
 
+    call SYS_ClearRAM                   ; Clear system RAM
+    call VDP_Initialize                 ; Initialize VDP
+    call VDP_loadFont                   ; Load font in VRAM
+    call VDP_WriteMessage               ; Write message on screen
+    call VDP_SetDisplayOn               ; Set display to on
+-: jr -
+
+; -----------------------------------------------------------------------
+
+; -----------------------------------------------------------------------
+; SYS CLEAR RAM
+; -----------------------------------------------------------------------
 SYS_ClearRAM:
-    ld hl, $c000                    ; RAM address
-    ld bc, 8174                     ; RAM size (~8kb)
-    ld d, $0                        ; Default value in RAM
--:
-    ld (hl), d                      ; Write 0 in RAM
-    dec bc                          ; Decrement counter
-    inc hl                          ; Increment address
-    ld a, c                         ; Load c in a
-    or a                            ; Check if a equal 0
-    jr nz, -                        ; Back to the loop
-    ld a, b                         ; Load b in a
-    or a                            ; Check if a equal 0
-    jr nz, -                        ; Back to the loop
-    ret                             ; Back to subroutine
+    ld hl, SYS_RAM                      ; Load $c000 in hl
+    ld de, $c000                        ; We start at $c000 
+    ld bc, $1feb                        ; We want copy 8171 bytes
+    ld (hl), l                          ; Set value to 0 (l => $00)
+    ldir                                ; Copy 1 byte hl to de and decremet bc
+    ret                                 ; Back to subroutine
 
 ; ----------------------------------------------------------------------
 ; VDP SET ADDRESS
 ; ----------------------------------------------------------------------
-.macro VDP_SetAddress
-    ld hl, 0000 | \1
-    ld c, VDP_CONTROL
-    di
-    out (c), l
-    out (c), h
-    ei
+.macro VDP_SetAddress args address
+    ld hl, address                      ; Load address in hl
+    ld c, VDP_CONTROL                   ; Load $bf in c
+    di                                  ; Disable interrupt
+    out (c), l                          ; Send l to $bf 
+    out (c), h                          ; Send h to $bf
+    ei                                  ; Enable interrupt 
 .endm
 ; ----------------------------------------------------------------------
 
@@ -81,19 +91,19 @@ SYS_ClearRAM:
 ; ----------------------------------------------------------------------
 VDP_Initialize:
     
-    ld hl, VDP_REGISTER_DATA        ; Load VDP_REGISTER_DATA address
-    ld b, $16                       ; Write on 11 VDP registers
-    ld c, VDP_CONTROL               ; Load VDP_CONTROL address
-    otir                            ; Write on all VDP registers
+    ld hl, VDP_REGISTER_DATA            ; Load VDP_REGISTER_DATA address
+    ld b, $16                           ; Write on 11 VDP registers (data with address)
+    ld c, VDP_CONTROL                   ; Load VDP_CONTROL address
+    otir                                ; Write on all VDP registers
     
     ; Clear VRAM
-    VDP_SetAddress VRAM_ADDR
-    ld a, 0                         ; Load zero value in a
-    ld bc, $4000                    ; Size of RAM (16384 bytes)
+    VDP_SetAddress VRAM_ADDR            ; Use macro for set VRAM_ADDR to VDP_CONTROL
+    ld a, $00                           ; Load zero value in a
+    ld bc, $4000                        ; Size of RAM (16384 bytes)
 -: 
-    out (VDP_DATA), a               ; Write data to VRAM
-    dec bc                          ; Decrement b
-    jr nz, -                        ; Loop if b not equal 0
+    out (VDP_DATA), a                   ; Write data to VRAM
+    dec bc                              ; Decrement b
+    jr nz, -                            ; Loop if b not equal 0
 
     ret
 ; ----------------------------------------------------------------------
@@ -102,60 +112,64 @@ VDP_Initialize:
 ; VDP LOAD PALETTE
 ; ----------------------------------------------------------------------
 VDP_LoadPalette:
-    VDP_SetAddress CRAM_ADDR            ; Set background palette address 
+    VDP_SetAddress CRAM_ADDR            ; Use macro for set CRAM_ADDR to VDP_CONTROL
     ld hl, PALETTE_DATA                 ; Load palette data
-    ld b, $f                            ; Set counter to f (16)
-    ld c, VDP_DATA                      ; Load VDP DATA address
+    ld b, $f                            ; Set counter to $f (16 colors)
+    ld c, VDP_DATA                      ; Load VDP_DATA address
 -:  
     outi                                ; Send data to VDP
     jp nz, -                            ; Back to the loop
     ret                                 ; Return to subroutine
 
-VDP_loadFont:
+VDP_loadFont:                           ; Use macro for set VRAM_ADDR to VDP_CONTROL
     call VDP_LoadPalette                ; Load font palette
     VDP_SetAddress VRAM_ADDR            ; Set address in VRAM 
     ld hl, FONT_DATA                    ; Load tileset font data
-    ld bc, FONT_DATA_END-FONT_DATA      ; Set size of tileset font data
+    ld de, FONT_DATA_SIZE               ; Set size of tileset font data
+    ld c, VDP_DATA
 -:  
-    ld a, (hl)                          ; Load data in a
-    out (VDP_DATA), a                   ; Send data to VDP
+    ld a, (hl)                          ; Load byte in a
+    out (c), a                          ; Send byte to VDP
     inc hl                              ; Incremet address
-    dec c                               ; Decrement c
-    ld a, c                             ; Load c in a
-    or a                                ; Check if a equal 0
-    jr nz, -                            ; Back to the loop
-    dec b                               ; Decrement b
-    ld a, b                             ; Load b in a
-    or a                                ; Check if a equal 0
-    jr nz, -                            ; Back to the loop
+    dec de                              ; Decrement $be
+    ld a, d                             ; Load $be in a
+    or e                                ; Check if e equal 0
+    jr nz, -                            ; Loop if not equal 0
     ret                                 ; Return to subroutine
 ; ----------------------------------------------------------------------
 
+; ----------------------------------------------------------------------
+; VDP WRITE MESSAGE
+; ----------------------------------------------------------------------
 VDP_WriteMessage:
     
-    VDP_SetAddress %11101011001110|VRAM_ADDR
-    ld hl,MESSAGE
-    ld c, VDP_DATA
--:  ld a,(hl)
-    cp $ff
-    ret z
-    out (c),a
-    xor a
-    out (c),a
-    inc hl
-    jr -
+    VDP_SetAddress $3ace|VRAM_ADDR      ; Use macro to set $3ace (11101011001110) to VDP_CONTROL
+    ld hl,MESSAGE_DATA                  ; Load MESSAGE_DATA in hl
+    ld c, VDP_DATA                      ; Load VDP_DATA in c
+    ld b, $ff
+-:  
+    ld a, (hl)                          ; Load contain of hl in a
+    out (c), a                          ; Send a to VDP_DATA                    
+    xor a                               ; Check if a equal 0 and store result in a
+    out (c), a                          ; Send a to VDP_DATA
+    inc hl                              ; Incremet hl
+    dec b                               ; Decremet b
+    cp b                                ; Compare b with a
+    jr nz, -                            ; Loop if a not equal 0
+    ret                                 ; Return to subroutine
 
 VDP_SetDisplayOn:
-    ld c, VDP_CONTROL
-    ld a,$40
-    out (c),a
-    ld a,$81
-    out (C),a
-    ret
+    ld c, VDP_CONTROL                   ; Load $bf in c
+    ld a, $40                           ; Load $40 in a 
+    out (c), a                          ; Send a to VDP_CONTROL
+    ld a, $81                           ; Load $81 (VDP Register 1) in a
+    out (c), a                          ; Send $81 to VDP_CONTROL
+    ret                                 ; Return to subroutine
+; -----------------------------------------------------------------------
 
-; ----------------------------------------------------------------------
+; -----------------------------------------------------------------------
 ; DATA
-; ----------------------------------------------------------------------
+; -----------------------------------------------------------------------
 VDP_REGISTER_DATA:
 .db $04, $80, $80, $81, $ff, $82, $ff, $83, $ff, $84, $ff, $85, $fb, $86, $00, $87, $00, $88, $00, $89, $47, $8a  
 VDP_REGISTER_END:
@@ -165,202 +179,12 @@ PALETTE_DATA:
 PALETTE_DATA_END:
 
 FONT_DATA:
-; Tile index $000
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-; Tile index $001
-.db $30 $00 $00 $00 $78 $00 $00 $00 $00 $78 $00 $00 $00 $30 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00
-; Tile index $002
-.db $6C $00 $00 $00 $6C $00 $00 $00 $00 $6C $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-; Tile index $003
-.db $6C $00 $00 $00 $6C $00 $00 $00 $00 $FE $00 $00 $00 $6C $00 $00 $FE $FE $00 $00 $6C $6C $00 $00 $6C $6C $00 $00 $00 $00 $00 $00
-; Tile index $004
-.db $30 $00 $00 $00 $7C $00 $00 $00 $00 $C0 $00 $00 $00 $78 $00 $00 $0C $0C $00 $00 $F8 $F8 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00
-; Tile index $005
-.db $00 $00 $00 $00 $C6 $00 $00 $00 $00 $CC $00 $00 $00 $18 $00 $00 $30 $30 $00 $00 $66 $66 $00 $00 $C6 $C6 $00 $00 $00 $00 $00 $00
-; Tile index $006
-.db $38 $00 $00 $00 $6C $00 $00 $00 $00 $38 $00 $00 $00 $76 $00 $00 $DC $DC $00 $00 $CC $CC $00 $00 $76 $76 $00 $00 $00 $00 $00 $00
-; Tile index $007
-.db $60 $00 $00 $00 $60 $00 $00 $00 $00 $C0 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-; Tile index $008
-.db $18 $00 $00 $00 $30 $00 $00 $00 $00 $60 $00 $00 $00 $60 $00 $00 $60 $60 $00 $00 $30 $30 $00 $00 $18 $18 $00 $00 $00 $00 $00 $00
-; Tile index $009
-.db $60 $00 $00 $00 $30 $00 $00 $00 $00 $18 $00 $00 $00 $18 $00 $00 $18 $18 $00 $00 $30 $30 $00 $00 $60 $60 $00 $00 $00 $00 $00 $00
-; Tile index $00A
-.db $00 $00 $00 $00 $66 $00 $00 $00 $00 $3C $00 $00 $00 $FF $00 $00 $3C $3C $00 $00 $66 $66 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-; Tile index $00B
-.db $00 $00 $00 $00 $30 $00 $00 $00 $00 $30 $00 $00 $00 $FC $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-; Tile index $00C
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $60 $60 $00 $00
-; Tile index $00D
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $FC $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-; Tile index $00E
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00
-; Tile index $00F
-.db $06 $00 $00 $00 $0C $00 $00 $00 $00 $18 $00 $00 $00 $30 $00 $00 $60 $60 $00 $00 $C0 $C0 $00 $00 $80 $80 $00 $00 $00 $00 $00 $00
-; Tile index $010
-.db $7C $00 $00 $00 $C6 $00 $00 $00 $00 $CE $00 $00 $00 $DE $00 $00 $F6 $F6 $00 $00 $E6 $E6 $00 $00 $7C $7C $00 $00 $00 $00 $00 $00
-; Tile index $011
-.db $30 $00 $00 $00 $70 $00 $00 $00 $00 $30 $00 $00 $00 $30 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $FC $FC $00 $00 $00 $00 $00 $00
-; Tile index $012
-.db $78 $00 $00 $00 $CC $00 $00 $00 $00 $0C $00 $00 $00 $38 $00 $00 $60 $60 $00 $00 $CC $CC $00 $00 $FC $FC $00 $00 $00 $00 $00 $00
-; Tile index $013
-.db $78 $00 $00 $00 $CC $00 $00 $00 $00 $0C $00 $00 $00 $38 $00 $00 $0C $0C $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $014
-.db $1C $00 $00 $00 $3C $00 $00 $00 $00 $6C $00 $00 $00 $CC $00 $00 $FE $FE $00 $00 $0C $0C $00 $00 $1E $1E $00 $00 $00 $00 $00 $00
-; Tile index $015
-.db $FC $00 $00 $00 $C0 $00 $00 $00 $00 $F8 $00 $00 $00 $0C $00 $00 $0C $0C $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $016
-.db $38 $00 $00 $00 $60 $00 $00 $00 $00 $C0 $00 $00 $00 $F8 $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $017
-.db $FC $00 $00 $00 $CC $00 $00 $00 $00 $0C $00 $00 $00 $18 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00
-; Tile index $018
-.db $78 $00 $00 $00 $CC $00 $00 $00 $00 $CC $00 $00 $00 $78 $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $019
-.db $78 $00 $00 $00 $CC $00 $00 $00 $00 $CC $00 $00 $00 $7C $00 $00 $0C $0C $00 $00 $18 $18 $00 $00 $70 $70 $00 $00 $00 $00 $00 $00
-; Tile index $01A
-.db $00 $00 $00 $00 $30 $00 $00 $00 $00 $30 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00
-; Tile index $01B
-.db $00 $00 $00 $00 $30 $00 $00 $00 $00 $30 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $60 $60 $00 $00
-; Tile index $01C
-.db $18 $00 $00 $00 $30 $00 $00 $00 $00 $60 $00 $00 $00 $C0 $00 $00 $60 $60 $00 $00 $30 $30 $00 $00 $18 $18 $00 $00 $00 $00 $00 $00
-; Tile index $01D
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $FC $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $FC $FC $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-; Tile index $01E
-.db $60 $00 $00 $00 $30 $00 $00 $00 $00 $18 $00 $00 $00 $0C $00 $00 $18 $18 $00 $00 $30 $30 $00 $00 $60 $60 $00 $00 $00 $00 $00 $00
-; Tile index $01F
-.db $78 $00 $00 $00 $CC $00 $00 $00 $00 $0C $00 $00 $00 $18 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00
-; Tile index $020
-.db $7C $00 $00 $00 $C6 $00 $00 $00 $00 $DE $00 $00 $00 $DE $00 $00 $DE $DE $00 $00 $C0 $C0 $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $021
-.db $30 $00 $00 $00 $78 $00 $00 $00 $00 $CC $00 $00 $00 $CC $00 $00 $FC $FC $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $00 $00 $00 $00
-; Tile index $022
-.db $FC $00 $00 $00 $66 $00 $00 $00 $00 $66 $00 $00 $00 $7C $00 $00 $66 $66 $00 $00 $66 $66 $00 $00 $FC $FC $00 $00 $00 $00 $00 $00
-; Tile index $023
-.db $3C $00 $00 $00 $66 $00 $00 $00 $00 $C0 $00 $00 $00 $C0 $00 $00 $C0 $C0 $00 $00 $66 $66 $00 $00 $3C $3C $00 $00 $00 $00 $00 $00
-; Tile index $024
-.db $F8 $00 $00 $00 $6C $00 $00 $00 $00 $66 $00 $00 $00 $66 $00 $00 $66 $66 $00 $00 $6C $6C $00 $00 $F8 $F8 $00 $00 $00 $00 $00 $00
-; Tile index $025
-.db $FE $00 $00 $00 $62 $00 $00 $00 $00 $68 $00 $00 $00 $78 $00 $00 $68 $68 $00 $00 $62 $62 $00 $00 $FE $FE $00 $00 $00 $00 $00 $00
-; Tile index $026
-.db $FE $00 $00 $00 $62 $00 $00 $00 $00 $68 $00 $00 $00 $78 $00 $00 $68 $68 $00 $00 $60 $60 $00 $00 $F0 $F0 $00 $00 $00 $00 $00 $00
-; Tile index $027
-.db $3C $00 $00 $00 $66 $00 $00 $00 $00 $C0 $00 $00 $00 $C0 $00 $00 $CE $CE $00 $00 $66 $66 $00 $00 $3E $3E $00 $00 $00 $00 $00 $00
-; Tile index $028
-.db $CC $00 $00 $00 $CC $00 $00 $00 $00 $CC $00 $00 $00 $FC $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $00 $00 $00 $00
-; Tile index $029
-.db $78 $00 $00 $00 $30 $00 $00 $00 $00 $30 $00 $00 $00 $30 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $02A
-.db $1E $00 $00 $00 $0C $00 $00 $00 $00 $0C $00 $00 $00 $0C $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $02B
-.db $E6 $00 $00 $00 $66 $00 $00 $00 $00 $6C $00 $00 $00 $78 $00 $00 $6C $6C $00 $00 $66 $66 $00 $00 $E6 $E6 $00 $00 $00 $00 $00 $00
-; Tile index $02C
-.db $F0 $00 $00 $00 $60 $00 $00 $00 $00 $60 $00 $00 $00 $60 $00 $00 $62 $62 $00 $00 $66 $66 $00 $00 $FE $FE $00 $00 $00 $00 $00 $00
-; Tile index $02D
-.db $C6 $00 $00 $00 $EE $00 $00 $00 $00 $FE $00 $00 $00 $FE $00 $00 $D6 $D6 $00 $00 $C6 $C6 $00 $00 $C6 $C6 $00 $00 $00 $00 $00 $00
-; Tile index $02E
-.db $C6 $00 $00 $00 $E6 $00 $00 $00 $00 $F6 $00 $00 $00 $DE $00 $00 $CE $CE $00 $00 $C6 $C6 $00 $00 $C6 $C6 $00 $00 $00 $00 $00 $00
-; Tile index $02F
-.db $38 $00 $00 $00 $6C $00 $00 $00 $00 $C6 $00 $00 $00 $C6 $00 $00 $C6 $C6 $00 $00 $6C $6C $00 $00 $38 $38 $00 $00 $00 $00 $00 $00
-; Tile index $030
-.db $FC $00 $00 $00 $66 $00 $00 $00 $00 $66 $00 $00 $00 $7C $00 $00 $60 $60 $00 $00 $60 $60 $00 $00 $F0 $F0 $00 $00 $00 $00 $00 $00
-; Tile index $031
-.db $78 $00 $00 $00 $CC $00 $00 $00 $00 $CC $00 $00 $00 $CC $00 $00 $DC $DC $00 $00 $78 $78 $00 $00 $1C $1C $00 $00 $00 $00 $00 $00
-; Tile index $032
-.db $FC $00 $00 $00 $66 $00 $00 $00 $00 $66 $00 $00 $00 $7C $00 $00 $6C $6C $00 $00 $66 $66 $00 $00 $E6 $E6 $00 $00 $00 $00 $00 $00
-; Tile index $033
-.db $78 $00 $00 $00 $CC $00 $00 $00 $00 $E0 $00 $00 $00 $70 $00 $00 $1C $1C $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $034
-.db $FC $00 $00 $00 $B4 $00 $00 $00 $00 $30 $00 $00 $00 $30 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $035
-.db $CC $00 $00 $00 $CC $00 $00 $00 $00 $CC $00 $00 $00 $CC $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $FC $FC $00 $00 $00 $00 $00 $00
-; Tile index $036
-.db $CC $00 $00 $00 $CC $00 $00 $00 $00 $CC $00 $00 $00 $CC $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00
-; Tile index $037
-.db $C6 $00 $00 $00 $C6 $00 $00 $00 $00 $C6 $00 $00 $00 $D6 $00 $00 $FE $FE $00 $00 $EE $EE $00 $00 $C6 $C6 $00 $00 $00 $00 $00 $00
-; Tile index $038
-.db $C6 $00 $00 $00 $C6 $00 $00 $00 $00 $6C $00 $00 $00 $38 $00 $00 $38 $38 $00 $00 $6C $6C $00 $00 $C6 $C6 $00 $00 $00 $00 $00 $00
-; Tile index $039
-.db $CC $00 $00 $00 $CC $00 $00 $00 $00 $CC $00 $00 $00 $78 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $03A
-.db $FE $00 $00 $00 $C6 $00 $00 $00 $00 $8C $00 $00 $00 $18 $00 $00 $32 $32 $00 $00 $66 $66 $00 $00 $FE $FE $00 $00 $00 $00 $00 $00
-; Tile index $03B
-.db $78 $00 $00 $00 $60 $00 $00 $00 $00 $60 $00 $00 $00 $60 $00 $00 $60 $60 $00 $00 $60 $60 $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $03C
-.db $C0 $00 $00 $00 $60 $00 $00 $00 $00 $30 $00 $00 $00 $18 $00 $00 $0C $0C $00 $00 $06 $06 $00 $00 $02 $02 $00 $00 $00 $00 $00 $00
-; Tile index $03D
-.db $78 $00 $00 $00 $18 $00 $00 $00 $00 $18 $00 $00 $00 $18 $00 $00 $18 $18 $00 $00 $18 $18 $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $03E
-.db $10 $00 $00 $00 $38 $00 $00 $00 $00 $6C $00 $00 $00 $C6 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-; Tile index $03F
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $FF $FF $00 $00
-; Tile index $040
-.db $30 $00 $00 $00 $30 $00 $00 $00 $00 $18 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-; Tile index $041
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $78 $00 $00 $00 $0C $00 $00 $7C $7C $00 $00 $CC $CC $00 $00 $76 $76 $00 $00 $00 $00 $00 $00
-; Tile index $042
-.db $E0 $00 $00 $00 $60 $00 $00 $00 $00 $60 $00 $00 $00 $7C $00 $00 $66 $66 $00 $00 $66 $66 $00 $00 $DC $DC $00 $00 $00 $00 $00 $00
-; Tile index $043
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $78 $00 $00 $00 $CC $00 $00 $C0 $C0 $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $044
-.db $1C $00 $00 $00 $0C $00 $00 $00 $00 $0C $00 $00 $00 $7C $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $76 $76 $00 $00 $00 $00 $00 $00
-; Tile index $045
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $78 $00 $00 $00 $CC $00 $00 $FC $FC $00 $00 $C0 $C0 $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $046
-.db $38 $00 $00 $00 $6C $00 $00 $00 $00 $60 $00 $00 $00 $F0 $00 $00 $60 $60 $00 $00 $60 $60 $00 $00 $F0 $F0 $00 $00 $00 $00 $00 $00
-; Tile index $047
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $76 $00 $00 $00 $CC $00 $00 $CC $CC $00 $00 $7C $7C $00 $00 $0C $0C $00 $00 $F8 $F8 $00 $00
-; Tile index $048
-.db $E0 $00 $00 $00 $60 $00 $00 $00 $00 $6C $00 $00 $00 $76 $00 $00 $66 $66 $00 $00 $66 $66 $00 $00 $E6 $E6 $00 $00 $00 $00 $00 $00
-; Tile index $049
-.db $30 $00 $00 $00 $00 $00 $00 $00 $00 $70 $00 $00 $00 $30 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $04A
-.db $0C $00 $00 $00 $00 $00 $00 $00 $00 $0C $00 $00 $00 $0C $00 $00 $0C $0C $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $78 $78 $00 $00
-; Tile index $04B
-.db $E0 $00 $00 $00 $60 $00 $00 $00 $00 $66 $00 $00 $00 $6C $00 $00 $78 $78 $00 $00 $6C $6C $00 $00 $E6 $E6 $00 $00 $00 $00 $00 $00
-; Tile index $04C
-.db $70 $00 $00 $00 $30 $00 $00 $00 $00 $30 $00 $00 $00 $30 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $04D
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $CC $00 $00 $00 $FE $00 $00 $FE $FE $00 $00 $D6 $D6 $00 $00 $C6 $C6 $00 $00 $00 $00 $00 $00
-; Tile index $04E
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $F8 $00 $00 $00 $CC $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $00 $00 $00 $00
-; Tile index $04F
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $78 $00 $00 $00 $CC $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $00 $00 $00 $00
-; Tile index $050
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $DC $00 $00 $00 $66 $00 $00 $66 $66 $00 $00 $7C $7C $00 $00 $60 $60 $00 $00 $F0 $F0 $00 $00
-; Tile index $051
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $76 $00 $00 $00 $CC $00 $00 $CC $CC $00 $00 $7C $7C $00 $00 $0C $0C $00 $00 $1E $1E $00 $00
-; Tile index $052
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $DC $00 $00 $00 $76 $00 $00 $66 $66 $00 $00 $60 $60 $00 $00 $F0 $F0 $00 $00 $00 $00 $00 $00
-; Tile index $053
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $7C $00 $00 $00 $C0 $00 $00 $78 $78 $00 $00 $0C $0C $00 $00 $F8 $F8 $00 $00 $00 $00 $00 $00
-; Tile index $054
-.db $10 $00 $00 $00 $30 $00 $00 $00 $00 $7C $00 $00 $00 $30 $00 $00 $30 $30 $00 $00 $34 $34 $00 $00 $18 $18 $00 $00 $00 $00 $00 $00
-; Tile index $055
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $CC $00 $00 $00 $CC $00 $00 $CC $CC $00 $00 $CC $CC $00 $00 $76 $76 $00 $00 $00 $00 $00 $00
-; Tile index $056
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $CC $00 $00 $00 $CC $00 $00 $CC $CC $00 $00 $78 $78 $00 $00 $30 $30 $00 $00 $00 $00 $00 $00
-; Tile index $057
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $C6 $00 $00 $00 $D6 $00 $00 $FE $FE $00 $00 $FE $FE $00 $00 $6C $6C $00 $00 $00 $00 $00 $00
-; Tile index $058
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $C6 $00 $00 $00 $6C $00 $00 $38 $38 $00 $00 $6C $6C $00 $00 $C6 $C6 $00 $00 $00 $00 $00 $00
-; Tile index $059
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $CC $00 $00 $00 $CC $00 $00 $CC $CC $00 $00 $7C $7C $00 $00 $0C $0C $00 $00 $F8 $F8 $00 $00
-; Tile index $05A
-.db $00 $00 $00 $00 $00 $00 $00 $00 $00 $FC $00 $00 $00 $98 $00 $00 $30 $30 $00 $00 $64 $64 $00 $00 $FC $FC $00 $00 $00 $00 $00 $00
-; Tile index $05B
-.db $1C $00 $00 $00 $30 $00 $00 $00 $00 $30 $00 $00 $00 $E0 $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $1C $1C $00 $00 $00 $00 $00 $00
-; Tile index $05C
-.db $18 $00 $00 $00 $18 $00 $00 $00 $00 $18 $00 $00 $00 $00 $00 $00 $18 $18 $00 $00 $18 $18 $00 $00 $18 $18 $00 $00 $00 $00 $00 $00
-; Tile index $05D
-.db $E0 $00 $00 $00 $30 $00 $00 $00 $00 $30 $00 $00 $00 $1C $00 $00 $30 $30 $00 $00 $30 $30 $00 $00 $E0 $E0 $00 $00 $00 $00 $00 $00
-; Tile index $05E
-.db $76 $00 $00 $00 $DC $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00 $00
-FONT_DATA_END:
-
-MESSAGE:
-.asc "HELLO SMS WORLD!!!"
-.db $ff
+.INCBIN	"res/font_tileset.bin" FSIZE FONT_DATA_SIZE
 
 .asciitable
 map " " to "~" = 0
 .enda
+
+MESSAGE_DATA:
+.asc "HELLO SMS WORLD!!!"
+.db $ff

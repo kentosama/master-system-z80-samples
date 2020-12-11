@@ -9,7 +9,9 @@
 rwildcard = $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 
 ASM=wla-z80
+ASFLAGS= -o
 LD=wlalink
+LDFLAGS = -v -r
 OUT_DIR=out
 CPUS?=$(shell nproc)
 MAKEFLAGS:=--jobs=$(CPUS)
@@ -41,9 +43,9 @@ $(OUT_DIR)/$(BIN): $(OBJS)
 	@mkdir -p $(OUT_DIR)
 	@echo -e '[objects]' > $(OUT_DIR)/tmp
 	@echo -e $(OBJS) >> $(OUT_DIR)/tmp
-	$(LD) -v -r $(OUT_DIR)/tmp $(OUT_DIR)/$(BIN)
+	$(LD) $(LDFLAGS) $(OUT_DIR)/tmp $(OUT_DIR)/$(BIN)
 	@rm -rf $(OUT_DIR)/tmp
 	
 $(OUT_DIR)/%.rel: %.asm
 	@mkdir -p $(@D)
-	$(ASM) -o $@ $^
+	$(ASM) $(ASFLAGS) $@ $^
