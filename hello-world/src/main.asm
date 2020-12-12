@@ -14,13 +14,14 @@
 .endro
 ; ----------------------------------------------------------------------
 
+.bank 0 slot 0                          ; Set the bank 0 at slot 0
+
 ; ----------------------------------------------------------------------
 ; SDSC TAG HEADER
 ; ----------------------------------------------------------------------
 .sdsctag 0.01, "Hello World!", "Simple Hello World! for SEGA Master System ", "Kentosama"
 ; ----------------------------------------------------------------------
 
-.bank 0 slot 0                          ; Set the bank 0 at slot 0
 
 ; ----------------------------------------------------------------------
 ; BOOT
@@ -98,11 +99,15 @@ VDP_Initialize:
     
     ; Clear VRAM
     VDP_SetAddress VRAM_ADDR            ; Use macro for set VRAM_ADDR to VDP_CONTROL
-    ld a, $00                           ; Load zero value in a
-    ld bc, $4000                        ; Size of RAM (16384 bytes)
+    ld b, $00                           ; Load zero value in a
+    ld de, $4000                        ; Size of RAM (16384 bytes)
+    ld c, VDP_DATA                      ; Load $bf in c
 -: 
-    out (VDP_DATA), a                   ; Write data to VRAM
-    dec bc                              ; Decrement b
+    ld a, b
+    out (c), a                          ; Write data to VRAM
+    dec de                              ; Decrement b
+    ld a, d                             ; Load d in a
+    or e                                ; Check if e equal 0
     jr nz, -                            ; Loop if b not equal 0
 
     ret
@@ -116,9 +121,7 @@ VDP_LoadPalette:
     ld hl, PALETTE_DATA                 ; Load palette data
     ld b, $f                            ; Set counter to $f (16 colors)
     ld c, VDP_DATA                      ; Load VDP_DATA address
--:  
-    outi                                ; Send data to VDP
-    jp nz, -                            ; Back to the loop
+    otir                                ; Send data to VDP_DATA
     ret                                 ; Return to subroutine
 
 VDP_loadFont:                           ; Use macro for set VRAM_ADDR to VDP_CONTROL
